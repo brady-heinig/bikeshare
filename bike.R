@@ -58,24 +58,37 @@ back_AIC <- step(full_mod, # starting model for algorithm
                  direction = "backward", 
                  scope=list(lower= base_mod, upper= full_mod))
 
+bike_train <- bike_train %>% select(-casual)
+bike_train <- bike_train %>% select(-registered)
+
+
+bike_train$weather <- as.factor(bike_train$weather)
+bike_train$holiday <- as.factor(bike_train$holiday)
+bike_train$workingday <- as.factor(bike_train$workingday)
+bike_train$season <- as.factor(bike_train$season)
+
+bike_test$weather <- as.factor(bike_test$weather)
+bike_test$holiday <- as.factor(bike_test$holiday)
+bike_test$workingday <- as.factor(bike_test$workingday)
+bike_test$season <- as.factor(bike_test$season)
+
 
 my_linear_model <- linear_reg() %>% 
   set_engine("lm") %>% 
   set_mode("regression") %>% 
-  fit(formula=Response~X1+X2+...,data=bike_train)
+  fit(formula=count~ .,data=bike_train)
 
 bike_predictions <- predict(my_linear_model,
                             new_data=bike_test)
 bike_predictions
 
 ## Format the Predictions for Submission to Kaggle1
-kaggle_submission <- bike_predictions %>%2
+kaggle_submission <- bike_predictions %>%
 bind_cols(., bike_test) %>% #Bind predictions with test data3
   select(datetime, .pred) %>% #Just keep datetime and prediction variables4
   rename(count=.pred) %>% #rename pred to count (for submission to Kaggle)5
   mutate(count=pmax(0, count)) %>% #pointwise max of (0, prediction)6
   mutate(datetime=as.character(format(datetime))) #needed for right format to Kaggle7
-8
 ## Write out the file9
 vroom_write(x=kaggle_submission, file="./LinearPreds.csv", delim=",")
 

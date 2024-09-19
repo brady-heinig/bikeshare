@@ -1,3 +1,4 @@
+## Packages
 library(tidyverse)
 library(tidymodels)
 library(vroom)
@@ -6,23 +7,33 @@ library(patchwork)
 library(skimr)
 library(DataExplorer)
 library(GGally)
+library(poissonreg)
+library(glmnet)
 
-### Read in Datasets
+################################################################################
+################################ Read in Datasets ##############################
+################################################################################
+
+## Pull in test and train datasets
 bike_train <- vroom("bike-sharing-demand/train.csv")
 bike_test <- vroom("bike-sharing-demand/test.csv")
 
-## Split explanatory vars & targets
-
+## Split target from features
 y_var <- names(bike_train[, 12])
 x_vars <- names(bike_train[, 1:9])
 
-### EDA
+################################################################################
+####################################### EDA ####################################
+################################################################################
 
+## Overview of Training Data
 skim(bike_train)
 
+## Basic Plots
 plot_bar(bike_train)
 plot_histogram(bike_train)
 
+##Build Scatterplots
 plot1<- ggplot(bike_train, aes(x = temp, y = count)) +  # Define the data and aesthetics (x and y axes)
   geom_point() +                   # Add points to the plot
   labs(title = "Temp vs Count",  # Add a title
@@ -50,18 +61,21 @@ plot4 <- ggplot(bike_train, aes(x = workingday, y = count)) +  # Define the data
   theme_minimal()     
 (plot1 + plot3) / (plot2 + plot4)
 
-### Modeling
-base_mod <- lm(count ~ 1, data = bike_train) # Intercept only model (null model, or base model)
-full_mod <- lm(count ~ datetime + season + holiday + workingday + weather + temp + atemp + humidity + windspeed, data = bike_train) # All predictors in model (besides response)
+################################################################################
+################################### Modeling ###################################
+################################################################################
 
-back_AIC <- step(full_mod, # starting model for algorithm
-                 direction = "backward", 
-                 scope=list(lower= base_mod, upper= full_mod))
+############################### Linear Regression ##############################
 
+## Pull in test and train datasets
+bike_train <- vroom("bike-sharing-demand/train.csv")
+bike_test <- vroom("bike-sharing-demand/test.csv")
+
+##Remove targets from training dataset
 bike_train <- bike_train %>% select(-casual)
 bike_train <- bike_train %>% select(-registered)
 
-
+## Make Variables into factors
 bike_train$weather <- as.factor(bike_train$weather)
 bike_train$holiday <- as.factor(bike_train$holiday)
 bike_train$workingday <- as.factor(bike_train$workingday)
@@ -72,41 +86,175 @@ bike_test$holiday <- as.factor(bike_test$holiday)
 bike_test$workingday <- as.factor(bike_test$workingday)
 bike_test$season <- as.factor(bike_test$season)
 
+#Variable Selection
+base_mod <- lm(count ~ 1, data = bike_train) # Intercept only model (null model, or base model)
+full_mod <- lm(count ~ datetime + season + holiday + workingday + weather + temp + atemp + humidity + windspeed, data = bike_train) # All predictors in model (besides response)
 
+back_AIC <- step(full_mod, # starting model for algorithm
+                 direction = "backward", 
+                 scope=list(lower= base_mod, upper= full_mod))
+## Build lin model
 my_linear_model <- linear_reg() %>% 
   set_engine("lm") %>% 
   set_mode("regression") %>% 
   fit(formula=count~ .,data=bike_train)
 
+## Make predictions
 bike_predictions <- predict(my_linear_model,
                             new_data=bike_test)
-bike_predictions
 
-## Format the Predictions for Submission to Kaggle1
+## Format the predictions for submission to kaggle
 kaggle_submission <- bike_predictions %>%
-bind_cols(., bike_test) %>% #Bind predictions with test data3
-  select(datetime, .pred) %>% #Just keep datetime and prediction variables4
-  rename(count=.pred) %>% #rename pred to count (for submission to Kaggle)5
-  mutate(count=pmax(0, count)) %>% #pointwise max of (0, prediction)6
-  mutate(datetime=as.character(format(datetime))) #needed for right format to Kaggle7
-## Write out the file9
+bind_cols(., bike_test) %>% 
+  select(datetime, .pred) %>% 
+  rename(count=.pred) %>% 
+  mutate(count=pmax(0, count)) %>% 
+  mutate(datetime=as.character(format(datetime))) 
+
+## Write out the file
 vroom_write(x=kaggle_submission, file="./LinearPreds.csv", delim=",")
 
-library(poissonreg)
-my_pois_model <- poisson_reg() %>% #Type of model
-  set_engine("glm") %>% # GLM = generalized linear model
+############################## Poisson Regression ##############################
+
+## Pull in test and train datasets
+bike_train <- vroom("bike-sharing-demand/train.csv")
+bike_test <- vroom("bike-sharing-demand/test.csv")
+
+##Remove targets from training dataset
+bike_train <- bike_train %>% select(-casual)
+bike_train <- bike_train %>% select(-registered)
+
+## Make Variables into factors
+bike_train$weather <- as.factor(bike_train$weather)
+bike_train$holiday <- as.factor(bike_train$holiday)
+bike_train$workingday <- as.factor(bike_train$workingday)
+bike_train$season <- as.factor(bike_train$season)
+
+bike_test$weather <- as.factor(bike_test$weather)
+bike_test$holiday <- as.factor(bike_test$holiday)
+bike_test$workingday <- as.factor(bike_test$workingday)
+bike_test$season <- as.factor(bike_test$season)
+
+## Build model
+my_pois_model <- poisson_reg() %>% 
+  set_engine("glm") %>% 
   set_mode("regression") %>%
 fit(formula=count~ weather + temp + workingday + holiday + season, data=bike_train)
-## Generate Predictions Using Linear Model8
-bike_predictions <- predict(my_pois_model,
-                            new_data=bike_test) # Use fit to predict
-bike_predictions ## Look at the output
 
+## Generate predictions using linear model
+bike_predictions <- predict(my_pois_model,
+                            new_data=bike_test) 
+
+## Format the predictions for submission to kaggle
 pois_kaggle_submission <- bike_predictions %>%
-bind_cols(., bike_test) %>% #Bind predictions with test data
-  select(datetime, .pred) %>% #Just keep datetime and prediction va
-  rename(count=.pred) %>% #rename pred to count (for submission to
-  mutate(datetime=as.character(format(datetime))) #needed for right
+bind_cols(., bike_test) %>% 
+  select(datetime, .pred) %>% 
+  rename(count=.pred) %>% 
+  mutate(datetime=as.character(format(datetime))) 
+
 ## Write out the file
 vroom_write(x=pois_kaggle_submission, file="./PoissonPreds.csv", delim=",")
 
+###################### Feature Engineered Lin Regression #######################
+
+## Pull in test and train datasets
+bike_train <- vroom("bike-sharing-demand/train.csv")
+bike_test <- vroom("bike-sharing-demand/test.csv")
+
+## Make Variables into factors
+bike_train$weather <- as.factor(bike_train$weather)
+bike_train$holiday <- as.factor(bike_train$holiday)
+bike_train$workingday <- as.factor(bike_train$workingday)
+bike_train$season <- as.factor(bike_train$season)
+
+bike_test$weather <- as.factor(bike_test$weather)
+bike_test$holiday <- as.factor(bike_test$holiday)
+bike_test$workingday <- as.factor(bike_test$workingday)
+bike_test$season <- as.factor(bike_test$season)
+
+bike_train <-  bike_train %>% 
+  select(-c(casual,registered)) %>% 
+  mutate(count=log(count))
+  
+## Build a recipe
+bike_recipe <- recipe(count~ ., data=bike_train) %>% 
+  step_mutate(weather=ifelse(weather==4,3,weather)) %>% 
+  step_mutate(weather=factor(weather, levels=, labels=)) %>% 
+  step_mutate(season=factor(season, levels=, labels=)) %>% 
+  step_mutate(workingday=factor(workingday, levels=, labels=)) %>% 
+  step_mutate(holiday=factor(holiday, levels=, labels=)) %>% 
+  step_time(datetime, features="hour") %>% 
+  step_date(datetime, features ="month") %>% 
+  step_mutate(season=factor(season, levels=, labels=)) %>% 
+  step_dummy(all_nominal_predictors()) %>% 
+  step_normalize(all_numeric_predictors())
+prepped_recipe <- prep(my_recipe) 
+bake(prepped_recipe, new_data= NULL)
+
+
+## Define a Model
+lin_model <- linear_reg() %>%
+set_engine("lm") %>%
+set_mode("regression")
+
+## Combine into a Workflow and fit
+bike_workflow <- workflow() %>%
+add_recipe(bike_recipe) %>%
+add_model(lin_model) %>%
+fit(data=bike_train)
+
+## Run all the steps on test data
+lin_preds <- predict(bike_workflow, new_data = bike_test)
+kaggle_submission <- lin_preds %>%
+  bind_cols(., bike_test) %>% 
+  select(datetime, .pred) %>% 
+  rename(count=.pred) %>% 
+  mutate(count=pmax(0, count)) %>% 
+  mutate(datetime=as.character(format(datetime))) %>% 
+  mutate(count = exp(count))
+
+## Write out the file
+vroom_write(x=kaggle_submission, file="./EngineeredLinearPreds.csv", delim=",")
+
+############################ Penalized Regression ##############################
+
+bike_train <- vroom("bike-sharing-demand/train.csv")
+bike_test <- vroom("bike-sharing-demand/test.csv")
+
+## Make Variables into factors
+bike_train$weather <- as.factor(bike_train$weather)
+bike_train$holiday <- as.factor(bike_train$holiday)
+bike_train$workingday <- as.factor(bike_train$workingday)
+bike_train$season <- as.factor(bike_train$season)
+
+bike_test$weather <- as.factor(bike_test$weather)
+bike_test$holiday <- as.factor(bike_test$holiday)
+bike_test$workingday <- as.factor(bike_test$workingday)
+bike_test$season <- as.factor(bike_test$season)
+
+bike_train <-  bike_train %>% 
+  select(-c(casual,registered)) ##%>% 
+  ##mutate(count=log(count))
+
+## Build a recipe
+my_recipe <- recipe(count ~ ., data=bike_train) %>%
+  step_mutate(weather=ifelse(weather==4,3,weather)) %>% 
+  step_time(datetime, features="hour") %>% 
+  step_date(datetime, features ="month") %>% 
+  step_dummy(all_nominal_predictors()) %>% 
+  step_normalize(all_numeric_predictors()) %>% 
+  step_select(-datetime)
+prepped_recipe <- prep(my_recipe)
+bake(prepped_recipe, new_data= NULL)
+
+#Set model and tuning
+preg_model <- linear_reg(penalty=1, mixture=0.5) %>% 
+  set_engine("glmnet") 
+
+preg_wf <- workflow() %>%
+  add_recipe(my_recipe) %>%
+  add_model(preg_model) %>%
+  fit(data=bike_train)
+
+predict(preg_wf, new_data=bike_test)
+predict
